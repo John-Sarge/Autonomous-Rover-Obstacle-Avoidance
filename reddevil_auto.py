@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Autonomous Rover Obstacle Avoidance Script using OAK-D and MAVLink.
 
@@ -17,6 +18,7 @@ import numpy as np
 from pymavlink import mavutil
 import signal # For handling Ctrl+C (SIGINT)
 import traceback # For printing full error details
+import cv2 # OpenCV for image processing and overlay
 
 # =============================================================================
 # --- Configuration Constants (ADJUST THESE CAREFULLY!) ---
@@ -63,7 +65,6 @@ SPATIAL_CALC_METHOD = dai.SpatialLocationCalculatorAlgorithm.MIN # MIN seemed ne
 # --- Obstacle Avoidance Logic Tuning ---
 # Distance threshold (meters). If closest point in an ROI is below this, trigger a reaction.
 OBSTACLE_THRESHOLD_M = 0.5       # TUNABLE: Your preferred value for office. Needs careful balance with speed.
-
 # Action to take ONLY if the CENTER ROI detects an obstacle below threshold.
 # Options: "STOP", "TURN_RIGHT", "TURN_LEFT", "REVERSE"
 # Note: TURN actions use counter-spin (defined by PWMs below).
@@ -92,6 +93,12 @@ ROVER_HALF_WIDTH_M = ROVER_WIDTH_M / 2.0 # Approx 0.254m
 # Safety buffer (meters). If obstacle's lateral position (X) is inside this distance
 # from the rover's physical edge, the turn is aborted (and backup initiated).
 SIDE_CLEARANCE_M = 0.07         # TUNABLE: Increase (e.g., 0.1, 0.15) if still hitting sides during turns.
+
+# GStreamer Video Output Settings
+GSTREAMER_PIPELINE = (
+    "appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! "
+    "udpsink host=127.0.0.1 port=5600"  # Update host and port for QGroundControl
+)
 
 # =============================================================================
 # --- Global Variables & Signal Handling ---
@@ -130,7 +137,7 @@ def connect_mavlink():
         return None
 
 def create_depthai_pipeline():
-    """Creates the DepthAI pipeline: Mono cams -> Stereo -> SpatialCalculator."""
+    """Creates the DepthAI pipeline: Mono cams -> Stereo -> SpatialCalculator -> RGB."""
     print("Creating DepthAI pipeline...")
     pipeline = dai.Pipeline()
 
@@ -139,11 +146,14 @@ def create_depthai_pipeline():
     monoRight = pipeline.create(dai.node.MonoCamera)
     stereo = pipeline.create(dai.node.StereoDepth)
     spatialCalc = pipeline.create(dai.node.SpatialLocationCalculator)
+    rgbCamera = pipeline.create(dai.node.ColorCamera)
     xoutSpatialCalc = pipeline.create(dai.node.XLinkOut) # Output for spatial data
+    xoutRgb = pipeline.create(dai.node.XLinkOut) # Output for RGB stream
     configIn = pipeline.create(dai.node.XLinkIn)         # Input for runtime config
 
     configIn.setStreamName("spatialConfig")       # Name for the config input queue
     xoutSpatialCalc.setStreamName("spatialData")  # Name for the results output queue
+    xoutRgb.setStreamName("rgb")                  # Name for the RGB output queue
 
     # 2. Configure Nodes
     # Set resolution and source for mono cameras
@@ -157,6 +167,11 @@ def create_depthai_pipeline():
     stereo.setExtendedDisparity(False) # Use for closer distances, disables subpixel
     stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY) # Preset for accuracy
     stereo.setRectifyEdgeFillColor(0)  # Fill areas with no depth info with black
+
+    # Configure RGB camera
+    rgbCamera.setBoardSocket(dai.CameraBoardSocket.RGB)
+    rgbCamera.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+    rgbCamera.setFps(DEPTH_RATE_HZ)
 
     # 3. Prepare Spatial Calculator configuration object (to be sent after pipeline start)
     spatial_config_object = dai.SpatialLocationCalculatorConfig()
@@ -182,11 +197,15 @@ def create_depthai_pipeline():
     stereo.depth.link(spatialCalc.inputDepth)      # Feed depth map to spatial calculator
     spatialCalc.out.link(xoutSpatialCalc.input)    # Send results to output queue
     configIn.out.link(spatialCalc.inputConfig)     # Link input queue to config input
+    rgbCamera.video.link(xoutRgb.input)            # Link RGB output
 
     print("Pipeline created.")
     # Return the pipeline structure AND the prepared config object
     return pipeline, spatial_config_object
 
+def start_gstreamer_pipeline(pipeline_desc):
+    """Starts a GStreamer pipeline for video streaming."""
+    return subprocess.Popen(pipeline_desc, shell=True, stdin=subprocess.PIPE, bufsize=0)
 def send_diff_drive_override(mav_connection, left_pwm, right_pwm):
     """Sends RC_CHANNELS_OVERRIDE for differential drive based on discovered channel mapping."""
     if not mav_connection: return # Do nothing if connection lost
@@ -243,8 +262,12 @@ if __name__ == "__main__":
             print("DepthAI device found.")
             # Get the output queue for spatial data results
             spatialCalcQueue = device.getOutputQueue(name="spatialData", maxSize=4, blocking=False)
+            rgbQueue = device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
             # Get the input queue for sending configuration
             configQueue = device.getInputQueue("spatialConfig")
+
+            # Start GStreamer pipeline for streaming
+            gstreamer_process = start_gstreamer_pipeline(GSTREAMER_PIPELINE)
 
             # Send the prepared ROI configuration to the spatial calculator node on the OAK-D
             print("Sending spatial calculator config to device..."); configQueue.send(spatial_config_to_send); print("Config sent.")
@@ -285,7 +308,6 @@ if __name__ == "__main__":
                 else:
                     # If data mismatch, wait briefly and try next cycle
                     time.sleep(0.1); continue
-
                 # Extract specific distances and lateral positions, defaulting to 'clear' values
                 center_dist, _ = obstacle_data.get("center", (999, 0))
                 left_dist, left_x = obstacle_data.get("left", (999, 0))
@@ -362,6 +384,19 @@ if __name__ == "__main__":
                     stop_rover(master)
                     break
 
+                # Get the latest RGB frame
+                rgbFrame = rgbQueue.tryGet()
+                if rgbFrame is not None:
+                    # Convert the frame to a format OpenCV can use
+                    frame = rgbFrame.getCvFrame()
+                    # Overlay obstacle data on image
+                    for name, (dist_m, x_m) in obstacle_data.items():
+                        color = (0, 255, 0) if dist_m >= OBSTACLE_THRESHOLD_M else (0, 0, 255)
+                        cv2.putText(frame, f"{name}: {dist_m:.2f}m", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                    # Stream frame with overlay using GStreamer
+                    gstreamer_process.stdin.write(frame.tobytes())
+
                 # --- Loop Delay ---
                 # Controls the rate of the control loop (~10Hz).
                 time.sleep(0.1)
@@ -377,4 +412,6 @@ if __name__ == "__main__":
             stop_rover(master) # Ensure motors are stopped
             master.close()     # Close the connection
             print("MAVLink connection closed.")
+        if gstreamer_process:
+            gstreamer_process.terminate()
         print("Script finished cleanly.")
