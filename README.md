@@ -140,8 +140,4 @@ Built using:
 - [pymavlink](https://www.ardusub.com/developers/pymavlink.html)
 - [mavlink-router](https://github.com/mavlink-router/mavlink-router)
 
----
 
-## 📬 Feedback
-
-Feel free to open issues or submit pull requests for improvements!
