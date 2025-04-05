@@ -9,8 +9,6 @@ differential drive / skid steer with specific output functions) via MAVLink
 
 It includes a basic geometric check to prevent turns that would likely cause
 a collision based on the rover's width.
-
-by John Seargeant
 """
 
 import time
