@@ -1,10 +1,10 @@
-# 🤖 Autonomous Rover Obstacle Avoidance System
+# Autonomous Rover Obstacle Avoidance System
 
 This project implements an autonomous obstacle avoidance system for a differential drive (skid-steer) rover using an **OAK-D depth camera** and **MAVLink** communication via **mavlink-router**. It uses depth data to detect obstacles in real-time and issues RC override commands to a Pixhawk (or similar) running ArduPilot.
 
 ---
 
-## 📸 System Overview
+## System Overview
 
 - **Depth Sensing:** Powered by the Luxonis OAK-D stereo camera using DepthAI SDK.
 - **Obstacle Detection:** Custom-defined Regions of Interest (ROIs) in the camera view allow fine-tuned detection zones.
@@ -13,7 +13,7 @@ This project implements an autonomous obstacle avoidance system for a differenti
 
 ---
 
-## 🚀 Features
+## Features
 
 - Real-time obstacle detection using spatial depth data.
 - Tunable obstacle response logic (`STOP`, `TURN_LEFT`, `TURN_RIGHT`, `REVERSE`).
@@ -23,7 +23,7 @@ This project implements an autonomous obstacle avoidance system for a differenti
 
 ---
 
-## 🧰 Requirements
+## Requirements
 
 ### Hardware
 
@@ -46,7 +46,7 @@ pip install depthai pymavlink
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Before running the script, tune the following parameters as needed:
 
@@ -92,7 +92,7 @@ Before running the script, tune the following parameters as needed:
 
 ---
 
-## 🧠 How It Works
+## How It Works
 
 1. **DepthAI pipeline** is initialized with stereo cameras and spatial ROI calculations.
 2. **ROIs** are configured to detect obstacles in the center, left, and right regions.
@@ -102,7 +102,7 @@ Before running the script, tune the following parameters as needed:
 
 ---
 
-## 🛠️ Usage
+## Usage
 
 1. Make sure `mavlink-router` is running and properly configured.
 2. Connect the OAK-D camera to your companion computer.
@@ -117,7 +117,7 @@ Press `Ctrl+C` to stop safely at any time.
 
 ---
 
-## 🧪 Testing & Tuning
+## Testing & Tuning
 
 - Use **visual tools** to debug ROIs and adjust their size and location.
 - Start with **low forward PWM** and **small ROIs**.
@@ -126,13 +126,7 @@ Press `Ctrl+C` to stop safely at any time.
 
 ---
 
-## 🧾 License
-
-This project is released under the MIT License.
-
----
-
-## 🙌 Credits
+## Credits
 
 Built using:
 - [DepthAI](https://docs.luxonis.com/)
